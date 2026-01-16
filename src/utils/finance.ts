@@ -1,9 +1,9 @@
 import {
   FICO_APR_TABLE,
   HOUSING_RATIO_CONSERVATIVE,
-  HOUSING_RATIO_AGGRESSIVE,
   DEBT_TO_INCOME_RATIO_CONSERVATIVE,
-  DEBT_TO_INCOME_RATIO_AGGRESSIVE,
+  AGGRESSIVE_RATIOS,
+  PMI_RATES,
 } from './constants';
 
 /**
@@ -79,18 +79,38 @@ export function calculateLoanAmountFromPayment(
 }
 
 /**
- * calculate max allowed housing payment based on income and down payment
- *  29% if down payment < 20%, 30% if >= 20%
+ * Get ratios based on down payment percentage per MyFICO guidelines
  */
-export function calculateMaxHousingPayment(
-  monthlyIncome: number
-): { conservative: number; aggressive: number } {
-  const aggressiveRatio = HOUSING_RATIO_AGGRESSIVE;
+export function getRatios(downPaymentPercent: number): {
+  conservative: { housing: number; debt: number };
+  aggressive: { housing: number; debt: number };
+} {
+  // Conservative ratios (flat for MyFICO behavior)
+  const conservativeHousing = HOUSING_RATIO_CONSERVATIVE;
+
+  // Aggressive ratios vary by down payment
+  let aggressiveRatios;
+  if (downPaymentPercent < 10) {
+    aggressiveRatios = AGGRESSIVE_RATIOS.lowDown;
+  } else if (downPaymentPercent < 20) {
+    aggressiveRatios = AGGRESSIVE_RATIOS.midDown;
+  } else {
+    aggressiveRatios = AGGRESSIVE_RATIOS.highDown;
+  }
 
   return {
-    conservative: monthlyIncome * HOUSING_RATIO_CONSERVATIVE,
-    aggressive: monthlyIncome * aggressiveRatio,
+    conservative: { housing: conservativeHousing, debt: DEBT_TO_INCOME_RATIO_CONSERVATIVE },
+    aggressive: { housing: aggressiveRatios.housing, debt: aggressiveRatios.debt },
   };
+}
+
+/**
+ * PMI rate tiering based on down payment
+ */
+export function getPMIRate(downPaymentPercent: number): number {
+  if (downPaymentPercent < 10) return PMI_RATES.lowDown;
+  if (downPaymentPercent < 20) return PMI_RATES.midDown;
+  return PMI_RATES.highDown;
 }
 
 /**
@@ -137,48 +157,72 @@ export function calculateHowMuchCanBorrow(
   apr: number;
 } {
   const apr = typeof aprOverride === 'number' ? aprOverride : getAPRFromScore(creditScore);
-  const housingPayments = calculateMaxHousingPayment(monthlyIncome);
+  const ratios = getRatios(downPaymentPercent);
+
+  // Calculate housing and DTI limits for both scenarios
+  const conservativeHousingPayment = monthlyIncome * ratios.conservative.housing;
   const conservativeDtiPayment = calculateMaxPaymentFromDTI(
     monthlyIncome,
     monthlyDebts,
-    DEBT_TO_INCOME_RATIO_CONSERVATIVE
+    ratios.conservative.debt
   );
+  const aggressiveHousingPayment = monthlyIncome * ratios.aggressive.housing;
   const aggressiveDtiPayment = calculateMaxPaymentFromDTI(
     monthlyIncome,
     monthlyDebts,
-    DEBT_TO_INCOME_RATIO_AGGRESSIVE
+    ratios.aggressive.debt
   );
 
-  const pmiRate = downPaymentPercent < 20 ? 0.0075 : 0;
+  const pmiRate = getPMIRate(downPaymentPercent);
   const calculateLoanWithPMI = (maxPITI: number) => {
-    const basePandI = Math.max(0, maxPITI - monthlyTaxesInsurance);
-    const baseLoan = calculateLoanAmountFromPayment(basePandI, apr, loanTermYears);
-    const baseMonthlyPMI = pmiRate > 0 ? (baseLoan * pmiRate) / 12 : 0;
-    const adjustedPandI = Math.max(0, maxPITI - monthlyTaxesInsurance - baseMonthlyPMI);
-    const adjustedLoan = calculateLoanAmountFromPayment(adjustedPandI, apr, loanTermYears);
-    const monthlyPMI = pmiRate > 0 ? (adjustedLoan * pmiRate) / 12 : 0;
-    const monthlyPayment = adjustedPandI + monthlyTaxesInsurance + monthlyPMI;
+    const maxPandI = Math.max(0, maxPITI - monthlyTaxesInsurance);
 
-    return {
-      loanAmount: adjustedLoan,
-      monthlyPandI: adjustedPandI,
-      monthlyPMI,
-      monthlyPayment,
-    };
+    if (maxPandI <= 0) {
+      return { loanAmount: 0, monthlyPandI: 0, monthlyPMI: 0, monthlyPayment: 0 };
+    }
+
+    // If no PMI, solve directly using P&I budget
+    if (pmiRate <= 0) {
+      const loanAmount = calculateLoanAmountFromPayment(maxPandI, apr, loanTermYears);
+      const monthlyPandI = calculateMonthlyPayment(loanAmount, apr, loanTermYears);
+      const monthlyPayment = monthlyPandI + monthlyTaxesInsurance;
+      return { loanAmount, monthlyPandI, monthlyPMI: 0, monthlyPayment };
+    }
+
+    // Solve for loan amount so that P&I + T&I + PMI == maxPITI
+    const maxLoanNoPMI = calculateLoanAmountFromPayment(maxPandI, apr, loanTermYears);
+    let low = 0;
+    let high = maxLoanNoPMI;
+
+    for (let i = 0; i < 60; i += 1) {
+      const mid = (low + high) / 2;
+      const monthlyPandI = calculateMonthlyPayment(mid, apr, loanTermYears);
+      const monthlyPMI = (mid * pmiRate) / 12;
+      const total = monthlyPandI + monthlyTaxesInsurance + monthlyPMI;
+
+      if (total > maxPITI) {
+        high = mid;
+      } else {
+        low = mid;
+      }
+    }
+
+    const loanAmount = low;
+    const monthlyPandI = calculateMonthlyPayment(loanAmount, apr, loanTermYears);
+    const monthlyPMI = (loanAmount * pmiRate) / 12;
+    const monthlyPayment = monthlyPandI + monthlyTaxesInsurance + monthlyPMI;
+
+    return { loanAmount, monthlyPandI, monthlyPMI, monthlyPayment };
   };
 
-  // conservative: use stricter housing ratio AND DTI limit
-  const conservativeMaxPITI = Math.min(housingPayments.conservative, conservativeDtiPayment);
+  // conservative: use lower of housing ratio and DTI limit
+  const conservativeMaxPITI = Math.min(conservativeHousingPayment, conservativeDtiPayment);
   const conservativeLoanResult = calculateLoanWithPMI(conservativeMaxPITI);
   const conservativeHomePrice =
     conservativeLoanResult.loanAmount / (1 - downPaymentPercent / 100);
 
-  // aggressive: apply front-end cap
-  const aggressiveMaxPITI = Math.min(
-    housingPayments.aggressive,
-    aggressiveDtiPayment,
-    monthlyIncome * 0.2882
-  );
+  // aggressive: use lower of housing ratio and DTI limit (no extra cap)
+  const aggressiveMaxPITI = Math.min(aggressiveHousingPayment, aggressiveDtiPayment);
   const aggressiveLoanResult = calculateLoanWithPMI(aggressiveMaxPITI);
   const aggressiveHomePrice =
     aggressiveLoanResult.loanAmount / (1 - downPaymentPercent / 100);

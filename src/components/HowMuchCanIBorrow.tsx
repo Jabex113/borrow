@@ -13,12 +13,12 @@ import './HowMuchCanIBorrow.css';
 
 export function HowMuchCanIBorrow() {
   const [wagesIncome, setWagesIncome] = useState(6000);
-  const [investmentIncome, setInvestmentIncome] = useState(12000);
+  const [investmentIncome, setInvestmentIncome] = useState(0);
   const [rentalIncome, setRentalIncome] = useState(0);
   const [otherIncome, setOtherIncome] = useState(0);
 
-  const [autoLoans, setAutoLoans] = useState(0);
-  const [studentLoans, setStudentLoans] = useState(0);
+  const [autoLoans, setAutoLoans] = useState(300);
+  const [studentLoans, setStudentLoans] = useState(100);
   const [creditCardPayments, setCreditCardPayments] = useState(0);
   const [alimonyPayments, setAlimonyPayments] = useState(0);
   const [rentalLoans, setRentalLoans] = useState(0);
@@ -27,8 +27,8 @@ export function HowMuchCanIBorrow() {
   const [interestRate, setInterestRate] = useState(5);
   const [loanTermYears, setLoanTermYears] = useState(30);
   const [downPaymentPercent, setDownPaymentPercent] = useState(20);
-  const [propertyTaxYearly, setPropertyTaxYearly] = useState(3252);
-  const [insuranceYearly, setInsuranceYearly] = useState(996);
+  const [propertyTaxYearly, setPropertyTaxYearly] = useState(3250);
+  const [insuranceYearly, setInsuranceYearly] = useState(1000);
 
   const [showDetails, setShowDetails] = useState(false);
   const [showTable, setShowTable] = useState(false);
@@ -85,6 +85,8 @@ export function HowMuchCanIBorrow() {
   );
   const monthlyPropertyTax = propertyTaxYearly / 12;
   const monthlyInsurance = insuranceYearly / 12;
+  const monthlyPMIConservative = results.conservative.monthlyPMI;
+  const monthlyPMIAggressive = results.aggressive.monthlyPMI;
   const isCustomTerm = !LOAN_TERMS.some((term) => term.years === loanTermYears);
   const termOptions = isCustomTerm
     ? [{ years: loanTermYears, label: `${loanTermYears} years` }, ...LOAN_TERMS]
@@ -523,8 +525,7 @@ export function HowMuchCanIBorrow() {
             <div className="warning-note">
               <AlertTriangle className="warning-icon" aria-hidden="true" />
               <span>
-                Down payment under 20% means stricter lending rules (28% housing ratio instead
-                of 32%).
+                Down payment under 20% means stricter lending ratios and PMI may apply.
               </span>
             </div>
           )}
@@ -597,6 +598,13 @@ export function HowMuchCanIBorrow() {
                 <span className="row-value">{formatCurrency(monthlyInsurance)}</span>
                 <span className="row-value">{formatCurrency(monthlyInsurance)}</span>
               </div>
+              {(monthlyPMIConservative > 0 || monthlyPMIAggressive > 0) && (
+                <div className="details-row">
+                  <span className="row-label">Private mortgage insurance (PMI)</span>
+                  <span className="row-value">{formatCurrency(monthlyPMIConservative)}</span>
+                  <span className="row-value">{formatCurrency(monthlyPMIAggressive)}</span>
+                </div>
+              )}
               <div className="details-row total">
                 <span className="row-label">Total monthly payment</span>
                 <span className="row-value">{formatCurrency(results.conservative.monthlyPayment)}</span>
