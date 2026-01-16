@@ -1,6 +1,7 @@
 import {
   FICO_APR_TABLE,
   HOUSING_RATIO_CONSERVATIVE,
+  HOUSING_RATIO_CONSERVATIVE_LOW_DOWN,
   DEBT_TO_INCOME_RATIO_CONSERVATIVE,
   AGGRESSIVE_RATIOS,
   PMI_RATES,
@@ -85,8 +86,11 @@ export function getRatios(downPaymentPercent: number): {
   conservative: { housing: number; debt: number };
   aggressive: { housing: number; debt: number };
 } {
-  // Conservative ratios (flat for MyFICO behavior)
-  const conservativeHousing = HOUSING_RATIO_CONSERVATIVE;
+  // Conservative housing ratio is lower when down payment is under 20%
+  const conservativeHousing =
+    downPaymentPercent < 20
+      ? HOUSING_RATIO_CONSERVATIVE_LOW_DOWN
+      : HOUSING_RATIO_CONSERVATIVE;
 
   // Aggressive ratios vary by down payment
   let aggressiveRatios;
