@@ -79,8 +79,11 @@ totalMonthly = P&I + taxesInsurance + PMI
 ```
 ---
 
-## Why earlier it failed to match MyFICO's when the downpayment are <20
+## Why earlier it failed to match MyFICO's when the downpayment are <20?
+```
+because my ratios/PMI tiers for <20% down didn't match the MyFICO calculator. they use lower conservative housing ratios and a much lower PMI rate for 10–20% down, and slightly different aggressive housing ratios. That’s why <20% results were off.
 
+```
 
 after applying all given formulas, the outputs should match MyFICO’s
 
